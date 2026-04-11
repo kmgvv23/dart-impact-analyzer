@@ -1,0 +1,10 @@
+streamlit>=1.39.0
+langgraph>=0.2.55
+langchain>=0.3.14
+langchain-openai>=0.2.14
+langchain-core>=0.3.29
+python-dotenv>=1.0.1
+requests>=2.32.3
+yfinance>=0.2.40
+duckduckgo-search>=6.3.5
+pydantic>=2.10.0

@@ -1,0 +1,97 @@
+# OOO Seed — 한국 공시 투자 판단 에이전트
+# 생성: 대화 인터뷰(Path B) + project_spec_main / disclosure_spec 반영
+# MCP session_id: 없음 (비영속 인터뷰)
+
+goal: >-
+  한국 상장사 공시를 입력받아 DART 원문 기반으로 유형 분류·명세 추출·LLM 종합 판단을 수행하고,
+  동업종·동일 유형·3년 엄격 매칭 후 완화 루프로 유사 공시를 찾으며,
+  KRX 시세로 공시 전후 장기(3개월~1년 포함) 수익률 패턴을 분석한 뒤,
+  요약·근거·시나리오·손절/익절/진입/관망 네 가지 액션 라벨을 담은 리포트를 제공한다.
+  MVP 우선순위는 기능 1(공시 판단 파이프라인)이며, 계좌·보유 연동은 하지 않는다.
+
+constraints:
+  - "MVP 범위: 기능 1(공시 투자 판단) 우선. 기능 2(재무 챗봇)는 동일 앱 내 탭으로 스펙에 존재하나 1차 완성도는 기능 1에 둔다."
+  - "비목표: 사용자 포트폴리오·계좌·보유 종목 연동 없음."
+  - "시세: 처음부터 KRX(또는 동등한 일별 시세) 실데이터 연동을 목표로 한다."
+  - "LLM: 프로젝트 규칙에 따라 OpenAI gpt-5-mini 사용. temperature/top_p 등 미지원 파라미터는 넣지 않는다."
+  - "컨센서스(잠정실적 등): 웹 검색으로 자동 보완; 조회 실패 시 필드값 '미확인'으로 표기한다."
+  - "UI: Streamlit, 탭 분리(공시 판단 / 데이터 챗봇) — project_spec_main."
+  - "분석 대상 공시 유형(룰 기반): 유상증자, CB/BW, 잠정실적, 합병/분할, 최대주주변경, 대규모계약, 관리종목/상장폐지. 해당 없음은 단순 정기공시 등으로 조기 종료."
+  - "정정공시·기재정정 등 제목/본문만으로 유형이 애매한 경우: 분석 대상에서 제외하고 LOW 또는 조기 종료."
+  - "복수 유형이 한 건에 섞인 경우: 단일 LLM 종합 판단 입력에 모든 유형 맥락을 포함한다. 내부 우선순위는 보수적(주주 불리·변동성 큰 쪽) 또는 종합 판단 중 구현 시 명시 규칙으로 선택 가능."
+  - "영향도 HIGH/MEDIUM 경계: 구현 기본 규칙 — (1) LLM이 강한 긍정 또는 강한 부정이며 (2) 명세 추출 수치·근거가 비교적 명확할 때 HIGH 후보; 그 외 애매하면 MEDIUM."
+  - "명세 추출 필드 누락: null 허용, 3단계 LLM이 공시 본문으로 보완 서술."
+  - "MEDIUM일 때 Step 2~3 전체 생략이 아니라, 유사 peer·주가는 가볍게(peer 개수 또는 한 문장 요약 수준)만 포함."
+  - "LOW 조기 종료 시: 짧은 교육 문구(해당 공시가 상대적으로 덜 중요한 이유)를 포함."
+  - "액션 의견: 손절/익절/진입/관망 유지 + 시나리오 서술 병행. 면책·비권유는 과도한 반복 없이 법적 요건에 맞게 배치."
+  - "도구: dart_disclosure_fetch, dart_disclosure_search, dart_financials, krx_price, web_search, chart_renderer — project_spec_main."
+
+acceptance_criteria:
+  - "샘플 공시 다수에 대해 Supervisor 파이프라인이 끝까지 실행 가능하다(담당자 수동 품질 확인)."
+  - "Peer 탐색: 최초 동업종+동일 공시 유형+최근 3년 조건으로 검색하고, 유사도 부족 시 조건 완화 루프가 동작한다."
+  - "주가 패턴: 1주·1개월·3개월·6개월·1년 중 장기(3개월~1년) 구간이 리포트에 반영된다."
+  - "잠정실적 등에서 컨센서스 필드가 없으면 '미확인'으로 표시되고 파이프라인은 중단되지 않는다."
+  - "영향도 LOW일 때 사용자에게 짧은 교육형 설명이 출력된다."
+  - "회색지대(정정·기재정정 등 분류 제외) 공시는 분석 대상에서 빠지고 조기 종료 경로가 명확하다."
+
+ontology_schema:
+  name: DisclosureInvestmentAgent
+  description: 공시 입력부터 리포트 출력까지의 도메인 객체
+  fields:
+    - name: disclosure_input
+      type: object
+      description: 사용자 입력(종목명, 공시 URL 등)
+    - name: disclosure_type
+      type: string
+      description: 룰 기반 1단계 분류 결과 또는 비대상/회색지대
+    - name: extracted_fields
+      type: object
+      description: disclosure_spec 기준 유형별 명세 추출(null 허용)
+    - name: llm_stance
+      type: string
+      description: 긍정/부정/중립 및 근거 서술
+    - name: impact_level
+      type: string
+      description: HIGH | MEDIUM | LOW
+    - name: peer_set
+      type: array
+      description: 유사 공시 기업·공시 메타(엄격→완화 검색 결과)
+    - name: price_pattern
+      type: object
+      description: KRX 기반 다기간 수익률·요약 통계
+    - name: final_report
+      type: object
+      description: 요약, 영향 근거, 가벼운 peer/주가 요약, 시나리오, 액션 라벨 4종
+
+evaluation_principles:
+  - principle: 파이프라인 완주 및 실데이터 연동
+    weight: 0.35
+  - principle: 리포트에 유형별 핵심 수치·근거·시나리오가 일관되게 담김
+    weight: 0.30
+  - principle: peer 매칭 정책(엄격 우선·완화 루프) 준수
+    weight: 0.20
+  - principle: LOW/회색지대 시 사용자 혼란 최소화(명확한 메시지·짧은 교육)
+    weight: 0.15
+
+exit_conditions:
+  - condition: 룰 기반 분류 결과가 분석 대상 유형이 아님
+    behavior: LOW, 조기 종료, 단순 정기공시 등 안내
+  - condition: 정정·기재정정 등 회색지대로 분류됨
+    behavior: 분석 제외, LOW 또는 조기 종료
+  - condition: impact_level이 LOW
+    behavior: Step 2~4 생략, 교육형 짧은 설명 출력
+  - condition: impact_level이 MEDIUM
+    behavior: Step 4 중심 리포트, peer·주가는 경량 요약
+  - condition: impact_level이 HIGH
+    behavior: Step 2~4 전체 실행
+
+metadata:
+  version: "1.0.0"
+  generated_at: "2026-04-11"
+  ambiguity_score: 0.18
+  interview_source: "cursor_conversation"
+  ouroboros_session_id: null
+  related_docs:
+    - PRD.md
+    - raw_spec.md
+    - disclosure_spec.md
